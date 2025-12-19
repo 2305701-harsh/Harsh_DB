@@ -1,68 +1,44 @@
 #!/bin/bash
+PSQL="psql --username=freecodecamp --dbname=number_guess -t --no-align -q -c"
 
-PSQL="psql --username=freecodecamp --dbname=number_guess -t --no-align -c"
+echo "Enter your username:"
+read USERNAME
 
-MENU() {
-    if [[ $1 ]]; then
-        echo -e "$1\n"
-    fi
-    echo "Enter your username:"
-    read USERNAME
-}
-
-GUESS() {
-    if [[ $1 ]]; then
-        echo -e "$1"
-    else
-        echo -e "Guess the secret number between 1 and 1000:"
-    fi
-    read NUMBER
-}
-
-MENU
-
-while [[ -z $USERNAME ]]; do
-    MENU "The username filed is required."
-done
-
-# --- Find user by name ----
 USER=$($PSQL "SELECT username,games_played,best_game FROM users WHERE username='$USERNAME'")
 if [[ -z $USER ]]; then
-    INSERT_USER=$($PSQL "INSERT INTO users(username) VALUES('$USERNAME')")
-    echo "Welcome, $USERNAME! It looks like this is your first time here."
+  $PSQL "INSERT INTO users(username,games_played,best_game) VALUES('$USERNAME',0,NULL)"
+  echo "Welcome, $USERNAME! It looks like this is your first time here."
+  GAMES_PLAYED=0
+  BEST_GAME=
 else
-    IFS='|' read -r -a USER_ARRAY <<<"$USER"
-    for ((i = 0; i <= ${#USER_ARRAY[@]} - 1; i++)); do
-        USER_ARRAY[$i]=$(echo ${USER_ARRAY[$i]} | sed -e 's/^+ | +$//')
-    done
-    echo "Welcome back, ${USER_ARRAY[0]}! You have played ${USER_ARRAY[1]} games, and your best game took ${USER_ARRAY[2]} guesses."
+  IFS='|' read USERNAME GAMES_PLAYED BEST_GAME <<< "$USER"
+  echo "Welcome back, $USERNAME! You have played $GAMES_PLAYED games, and your best game took $BEST_GAME guesses."
 fi
 
-# ---- RANDOM NUMBER && NUMBER OF GUESSES
-GUESS_NUMBER=$((RANDOM % 1000 + 1))
-GUESS_COUNT=1
+SECRET_NUMBER=$((RANDOM % 1000 + 1))
+GUESS_COUNT=0
 
-GUESS
-
-while [[ $NUMBER -ne $GUESS_NUMBER ]]; do
-    if ! [[ $NUMBER =~ ^[0-9]+$ ]]; then
-        GUESS "That is not an integer, guess again:"
-    elif [[ $NUMBER -lt $GUESS_NUMBER ]]; then
-        GUESS "It's higher than that, guess again:"
-    elif [[ $NUMBER -gt $GUESS_NUMBER ]]; then
-        GUESS "It's lower than that, guess again:"
-    fi
-    ((GUESS_COUNT++))
-done
-
-if [[ -z "${USER_ARRAY}" ]]; then
-    UPDATE_USER=$($PSQL "UPDATE users SET games_played=1,best_game=$GUESS_COUNT WHERE username='$USERNAME'")
-else
-    GAMES_PLAYED=$((${USER_ARRAY[1]} + 1))
-    if [[ $GUESS_COUNT -lt ${USER_ARRAY[2]} ]]; then
-        UPDATE_USER=$($PSQL "UPDATE users SET games_played=$GAMES_PLAYED,best_game=$GUESS_COUNT WHERE username='$USERNAME'")
+echo "Guess the secret number between 1 and 1000:"
+while true
+do
+  read NUMBER
+  if ! [[ $NUMBER =~ ^[0-9]+$ ]]; then
+    echo "That is not an integer, guess again:"
+    continue
+  fi
+  ((GUESS_COUNT++))
+  if [[ $NUMBER -eq $SECRET_NUMBER ]]; then
+    echo "You guessed it in $GUESS_COUNT tries. The secret number was $SECRET_NUMBER. Nice job!"
+    if [[ -z $BEST_GAME ]]; then
+      $PSQL "UPDATE users SET games_played=games_played+1, best_game=$GUESS_COUNT WHERE username='$USERNAME'"
     else
-        UPDATE_USER=$($PSQL "UPDATE users SET games_played=$GAMES_PLAYED WHERE username='$USERNAME'")
+      $PSQL "UPDATE users SET games_played=games_played+1 WHERE username='$USERNAME'"
+      $PSQL "UPDATE users SET best_game=LEAST(best_game,$GUESS_COUNT) WHERE username='$USERNAME'"
     fi
-fi
-echo "You guessed it in $GUESS_COUNT tries. The secret number was $GUESS_NUMBER. Nice job!"
+    break
+  elif [[ $NUMBER -gt $SECRET_NUMBER ]]; then
+    echo "It's lower than that, guess again:"
+  else
+    echo "It's higher than that, guess again:"
+  fi
+done
